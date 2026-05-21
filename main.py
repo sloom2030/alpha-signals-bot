@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from telegram import Bot
 from telegram.constants import ParseMode
 
-BOT_TOKEN = "8735462840:AAF5uJI6w5ZVUjxqy58rpawLJP4X_9v51A8"
-CHANCHANNEL_ID = "@AlphaSignalsBot"
+BOT_TOKEN = "8735462840:AAF5uJI6w5ZVUjxqy58rpawLJP4X_9v51A
+CHANNEL_ID = -1003924776124
 
 
 SCAN_INTERVAL_MINUTES = 15
