@@ -25,7 +25,7 @@ sent_tokens = {}
 
 async def fetch_coingecko_data(session):
     try:
-        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "sparkline": False, "price_change_percentage": "1h,24h"}
+        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "sparkline": "false", "price_change_percentage": "1h,24h"}
         async with session.get(f"{COINGECKO_BASE}/coins/markets", params=params, timeout=10) as resp:
             if resp.status == 200:
                 return await resp.json()
