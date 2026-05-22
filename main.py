@@ -44,18 +44,32 @@ def calculate_signal_strength(price_change, liquidity):
 def is_blacklisted(name):
     name_lower = name.lower()
     return any(keyword in name_lower for keyword in BLACKLIST_KEYWORDS)
-
 async def send_signal(bot, token_name, price_change, liquidity, mcap, strength, prediction):
-    message = (
-        f"🚀 <b>ALPHA SIGNAL - {token_name}</b>\n\n"
-        f"<b>أسباب الإشارة:</b> 📋\n"
-        f"السيولة: ${liquidity:,.0f}\n"
-        f"ماركت كاب: ${mcap:,.0f}\n"
-        f"الارتفاع الحالي: {price_change:.1f}% ⚡\n\n"
-        f"<b>💪 قوة الإشارة: {strength}</b>\n"
-        f"<b>{prediction}</b>\n\n"
-        f"⚠️ ليست نصيحة استثمارية\n"
-        f"#AlphaSignals #LowCap"
+    try:
+        price_change = float(price_change) if price_change else 0.0
+        liquidity = float(liquidity) if liquidity else 0.0
+        mcap = float(mcap) if mcap else 0.0
+        token_name = str(token_name)
+        strength = str(strength)
+        prediction = str(prediction)
+        
+        message = (
+            f"🚀 <b>ALPHA SIGNAL - {token_name}</b>\n\n"
+            f"<b>أسباب الإشارة:</b> 📋\n"
+            f"السيولة: {liquidity:,.0f}$\n"
+            f"ماركت كاب: {mcap:,.0f}$\n"
+            f"الارتفاع: {price_change:.1f}%\n\n"
+            f"<b>💪 {strength}</b>\n"
+            f"<b>{prediction}</b>\n\n"
+            f"⚠️ ليست نصيحة استثمارية"
+        )
+        
+        await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode=ParseMode.HTML)
+        log.info(f"✅ Signal: {token_name}")
+    except Exception as e:
+        log.error(f"Send error: {str(e)}")
+
+
     )
     try:
         await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode=ParseMode.HTML)
