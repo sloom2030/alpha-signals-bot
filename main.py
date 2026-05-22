@@ -14,7 +14,7 @@ MAX_MARKET_CAP_USD = 20000000
 MIN_MARKET_CAP_USD = 100000
 MIN_VOLUME_MCAP_RATIO = 0.15
 MIN_PRICE_CHANGE_1H = 5.0
-MIN_PRICE_CHANGE_6H = 5.0
+MIN_PRICE_CHANGE_24H = 5.0
 COOLDOWN_HOURS = 4
 BLACKLIST_KEYWORDS = ["elon", "doge2", "moon", "safe", "inu", "baby", "pepe2", "shib2"]
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
@@ -31,8 +31,6 @@ def calculate_signal_strength(price_change_1h, volume_mcap_ratio, volume_usd, ma
         score += 30
     elif price_change_1h >= 5:
         score += 20
-    elif price_change_1h >= 3:
-        score += 10
     
     if volume_mcap_ratio >= 0.5:
         score += 30
@@ -62,7 +60,13 @@ def calculate_signal_strength(price_change_1h, volume_mcap_ratio, volume_usd, ma
 
 async def fetch_coingecko_data(session):
     try:
-        params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 250, "sparkline": False, "price_change_percentage": "1h,24h"}
+        params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 250,
+            "sparkline": False,
+            "price_change_percentage": "1h,24h"
+        }
         url = f"{COINGECKO_BASE}/coins/markets"
         async with session.get(url, params=params, timeout=10) as resp:
             if resp.status == 200:
@@ -76,37 +80,55 @@ def is_blacklisted(name):
     return any(keyword in name_lower for keyword in BLACKLIST_KEYWORDS)
 
 async def send_signal(bot, token_name, price_change_1h, price_change_24h, market_cap, volume_usd, volume_mcap_ratio, strength, prediction):
-    message = (f"🚀 <b>ALPHA SIGNAL - {token_name}</b>\n\n<b>أسباب الإشارة:</b> 📋\nحجم التداول: {volume_usd/1000:.0f}K$\nماركت كاب: {market_cap/1000000:.2f}M$\nارتفاع 1h: {price_change_1h:.1f}% ⚡\nارتفاع 24h: {price_change_24h:.1f}% 📈\nضغط شراء قوي: {volume_mcap_ratio*100:.0f}% 🔥\n\n<b>💪 قوة الإشارة: {strength}</b>\n<b>{prediction}</b>\n\n⚠️ ليست نصيحة استثمارية\n#AlphaSignals #LowCap")
+    message = (
+        f"🚀 <b>ALPHA SIGNAL - {token_name}</b>\n\n"
+        f"<b>أسباب الإشارة:</b> 📋\n"
+        f"حجم التداول: {volume_usd/1000:.0f}K$\n"
+        f"ماركت كاب: {market_cap/1000000:.2f}M$\n"
+        f"ارتفاع 1h: {price_change_1h:.1f}% ⚡\n"
+        f"ارتفاع 24h: {price_change_24h:.1f}% 📈\n"
+        f"ضغط شراء قوي: {volume_mcap_ratio*100:.0f}% 🔥\n\n"
+        f"<b>💪 قوة الإشارة: {strength}</b>\n"
+        f"<b>{prediction}</b>\n\n"
+        f"⚠️ ليست نصيحة استثمارية\n"
+        f"#AlphaSignals #LowCap"
+    )
     try:
         await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode=ParseMode.HTML)
         log.info(f"✅ Signal sent: {token_name}")
     except Exception as e:
-        log.error(f"Error: {e}")
+        log.error(f"Error sending signal: {e}")
 
 async def scan_market(session, bot):
-    log.info("🔍 Scanning...")
+    log.info("🔍 Scanning market...")
     coins = await fetch_coingecko_data(session)
+    
     for coin in coins:
         try:
             symbol = coin.get("symbol", "").upper()
             name = coin.get("name", "")
-            market_cap = coin.get("market_cap") or 0
-            volume_24h = coin.get("total_volume") or 
-                        price_change_1h = coin.get("price_change_percentage_1h_in_currency")
+            market_cap = coin.get("market_cap")
+            volume_24h = coin.get("total_volume")
+            price_change_1h = coin.get("price_change_percentage_1h_in_currency")
+            price_change_24h = coin.get("price_change_percentage_24h_in_currency")
+            
+            if not symbol or not name:
+                continue
+            
+            if market_cap is None or volume_24h is None:
+                continue
+            
             if price_change_1h is None or price_change_1h is False:
                 price_change_1h = 0
-            price_change_24h = coin.get("price_change_percentage_24h_in_currency")
             if price_change_24h is None or price_change_24h is False:
                 price_change_24h = 0
-
-            if not isinstance(price_change_24h, (int, float)):
-                price_change_24h = 0
-
             
             if is_blacklisted(name):
                 continue
+            
             if not (MIN_MARKET_CAP_USD <= market_cap <= MAX_MARKET_CAP_USD):
                 continue
+            
             if volume_24h < MIN_VOLUME_USD:
                 continue
             
@@ -114,9 +136,11 @@ async def scan_market(session, bot):
             
             if volume_mcap_ratio < MIN_VOLUME_MCAP_RATIO:
                 continue
+            
             if price_change_1h < MIN_PRICE_CHANGE_1H:
                 continue
-            if price_change_24h < MIN_PRICE_CHANGE_6H:
+            
+            if price_change_24h < MIN_PRICE_CHANGE_24H:
                 continue
             
             strength, prediction = calculate_signal_strength(price_change_1h, volume_mcap_ratio, volume_24h, market_cap)
@@ -129,21 +153,23 @@ async def scan_market(session, bot):
             await send_signal(bot, symbol, price_change_1h, price_change_24h, market_cap, volume_24h, volume_mcap_ratio, strength, prediction)
             sent_tokens[symbol] = current_time
             await asyncio.sleep(1)
+        
         except Exception as e:
-            log.error(f"Error: {e}")
+            log.error(f"Error processing coin: {e}")
             continue
 
 async def main():
     bot = Bot(token=BOT_TOKEN)
     log.info("✅ Bot started!")
+    
     async with aiohttp.ClientSession() as session:
         while True:
             try:
                 await scan_market(session, bot)
-                log.info(f"✅ Scan done - waiting {SCAN_INTERVAL_MINUTES} minutes...")
+                log.info(f"✅ Scan complete - waiting {SCAN_INTERVAL_MINUTES} minutes...")
                 await asyncio.sleep(SCAN_INTERVAL_MINUTES * 60)
             except Exception as e:
-                log.error(f"Error: {e}")
+                log.error(f"Main loop error: {e}")
                 await asyncio.sleep(60)
 
 if __name__ == "__main__":
