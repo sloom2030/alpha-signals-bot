@@ -4,6 +4,7 @@ import logging
 import time
 from telegram import Bot
 from telegram.constants import ParseMode
+from aiohttp import web
 
 BOT_TOKEN = "8735462840:AAF5uJI6w5ZVUjxqy58rpawLJP4X_9v51A8"
 CHANNEL_ID = -1003924776124
@@ -47,7 +48,6 @@ async def send_signal(bot, symbol, p1h, p24h, mcap, vol, ratio):
 async def scan_market(session, bot):
     log.info("🔍 Scanning...")
     coins = await fetch_coingecko_data(session)
-    
     for coin in coins:
         try:
             sym = coin.get("symbol", "").upper()
@@ -56,32 +56,38 @@ async def scan_market(session, bot):
             vol = float(coin.get("total_volume") or 0)
             p1h = float(coin.get("price_change_percentage_1h_in_currency") or 0)
             p24h = float(coin.get("price_change_percentage_24h_in_currency") or 0)
-            
             if not sym or is_blacklisted(name):
                 continue
             if not (MIN_MARKET_CAP_USD <= mcap <= MAX_MARKET_CAP_USD):
                 continue
             if vol < MIN_VOLUME_USD:
                 continue
-            
             ratio = vol / mcap if mcap > 0 else 0
-            
             if ratio < MIN_VOLUME_MCAP_RATIO or p1h < MIN_PRICE_CHANGE_1H or p24h < MIN_PRICE_CHANGE_6H:
                 continue
-            
             ct = time.time()
             if sym in sent_tokens and ct - sent_tokens[sym] < COOLDOWN_HOURS * 3600:
                 continue
-            
             await send_signal(bot, sym, p1h, p24h, mcap, vol, ratio)
             sent_tokens[sym] = ct
             await asyncio.sleep(1)
         except:
             continue
 
+async def health(request):
+    return web.Response(text="OK")
+
 async def main():
     bot = Bot(token=BOT_TOKEN)
     log.info("✅ Bot started!")
+    
+    app = web.Application()
+    app.router.add_get("/", health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
+    
     async with aiohttp.ClientSession() as session:
         while True:
             try:
