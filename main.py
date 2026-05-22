@@ -1,4 +1,4 @@
-import asyncio
+ import asyncio
 import aiohttp
 import logging
 import time
@@ -80,15 +80,29 @@ async def scan_market(session, bot):
     
     for token in tokens:
         try:
-            symbol = token.get("symbol", "").upper()
-            name = token.get("name", "")
+            symbol = str(token.get("symbol", "")).upper()
+            name = str(token.get("name", ""))
             
-            if not symbol or is_blacklisted(name):
+            if not symbol or symbol == "NONE" or is_blacklisted(name):
                 continue
             
-            mcap = float(token.get("marketCap", 0))
-            liquidity = float(token.get("liquidity", 0))
-            price_change = float(token.get("priceChange1h", 0))
+            try:
+                mcap = float(token.get("marketCap") or 0)
+            except:
+                mcap = 0
+            
+            try:
+                liquidity = float(token.get("liquidity") or 0)
+            except:
+                liquidity = 0
+            
+            try:
+                price_change = float(token.get("priceChange1h") or 0)
+            except:
+                price_change = 0
+            
+            if mcap <= 0 or liquidity <= 0 or price_change <= 0:
+                continue
             
             if not (MIN_MARKET_CAP_USD <= mcap <= MAX_MARKET_CAP_USD):
                 continue
@@ -109,7 +123,8 @@ async def scan_market(session, bot):
             await asyncio.sleep(1)
         
         except Exception as e:
-            log.error(f"Error: {e}")
+            log.error(f"Token error: {str(e)}")
+            continue
 
 async def main():
     bot = Bot(token=BOT_TOKEN)
@@ -127,3 +142,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
