@@ -91,12 +91,14 @@ async def scan_market(session, bot):
             symbol = coin.get("symbol", "").upper()
             name = coin.get("name", "")
             market_cap = coin.get("market_cap") or 0
-            volume_24h = coin.get("total_volume") or 0
-                        price_change_1h = coin.get("price_change_percentage_1h_in_currency") or 0
-            if not isinstance(price_change_1h, (int, float)):
+            volume_24h = coin.get("total_volume") or 
+                        price_change_1h = coin.get("price_change_percentage_1h_in_currency")
+            if price_change_1h is None or price_change_1h is False:
                 price_change_1h = 0
+            price_change_24h = coin.get("price_change_percentage_24h_in_currency")
+            if price_change_24h is None or price_change_24h is False:
+                price_change_24h = 0
 
-                    price_change_24h = coin.get("price_change_percentage_24h_in_currency") or 0
             if not isinstance(price_change_24h, (int, float)):
                 price_change_24h = 0
 
