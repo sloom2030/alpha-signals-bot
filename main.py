@@ -3,7 +3,6 @@ import aiohttp
 import logging
 import time
 from telegram import Bot
-from telegram.constants import ParseMode
 
 BOT_TOKEN = "8735462840:AAF5uJI6w5ZVUjxqy58rpawLJP4X_9v51A8"
 CHANNEL_ID = -1003924776124
@@ -33,11 +32,11 @@ def calculate_signal_strength(price_change, liquidity):
     elif liquidity >= 20000:
         score += 20
     if score >= 70:
-        return "🔥 STRONG", "احتمال +30% في الساعة القادمة"
+        return "🔥 STRONG", "احتمال +30%"
     elif score >= 40:
-        return "⚡ MEDIUM", "احتمال +20% في الساعة القادمة"
+        return "⚡ MEDIUM", "احتمال +20%"
     else:
-        return "📊 WEAK", "احتمال +10% في الساعة القادمة"
+        return "📊 WEAK", "احتمال +10%"
 
 def is_blacklisted(name):
     name_lower = name.lower()
@@ -45,8 +44,15 @@ def is_blacklisted(name):
 
 async def send_signal(bot, token_name, price_change, liquidity, mcap, strength, prediction):
     try:
-        message = f"🚀 <b>ALPHA SIGNAL - {token_name}</b>\n\n<b>أسباب الإشارة:</b> 📋\nالسيولة: {liquidity:,.0f}$\nماركت كاب: {mcap:,.0f}$\nالارتفاع: {price_change:.1f}%\n\n<b>💪 {strength}</b>\n<b>{prediction}</b>\n\n⚠️ ليست نصيحة استثمارية"
-        await bot.send_message(chat_id=CHANNEL_ID, text=message, parse_mode=ParseMode.HTML)
+        token_name = str(token_name)
+        price_change = str(float(price_change))
+        liquidity = str(int(liquidity))
+        mcap = str(int(mcap))
+        strength = str(strength)
+        prediction = str(prediction)
+        
+        message = f"🚀 SIGNAL - {token_name}\n\nسيولة: {liquidity}$\nماركت: {mcap}$\nارتفاع: {price_change}%\n\n{strength}\n{prediction}"
+        await bot.send_message(chat_id=CHANNEL_ID, text=message)
         log.info(f"✅ {token_name}")
     except Exception as e:
         log.error(f"Error: {e}")
@@ -126,3 +132,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
