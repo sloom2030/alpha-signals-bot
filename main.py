@@ -16,7 +16,7 @@ MIN_PRICE_CHANGE_24H = 3.0
 MAX_PRICE_CHANGE_24H = 60.0
 COOLDOWN_HOURS = 6
 
-BLACKLIST = ["USDT", "BUSD", "USDC", "DAI", "TUSD", "FDUSD", "USDP", "WBTC", "BETH"]
+BLACKLIST = ["BUSD", "USDC", "DAI", "TUSD", "FDUSD", "USDP", "WBTC", "BETH"]
 BINANCE_BASE = "https://api.binance.us/api/v3"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s")
@@ -94,7 +94,8 @@ def estimate_potential(change_1h, change_4h, vol_surge, is_breakout):
    else: return score, 3, 10, "⚡ ضعيف"
 
 def is_blacklisted(symbol):
-   return any(bl in symbol for bl in BLACKLIST)
+   clean = symbol.replace("USDT", "")
+   return any(bl == clean for bl in BLACKLIST)
 
 async def send_signal(bot, data):
    sym = data["symbol"]
@@ -131,111 +132,4 @@ async def send_signal(bot, data):
 الهدف: <b>+{target_low}% ~ +{target_high}%</b>
 القوة: {strength} (نقاط: {score}/10)
 
-⚠️ <i>ليست نصيحة مالية - تداول بمسؤولية</i>
-#AlphaSignals #{sym.replace('USDT', '')}"""
-
-   try:
-       await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode=ParseMode.HTML)
-       log.info(f"✅ إشارة أُرسلت: {sym}")
-   except Exception as e:
-       log.error(f"خطأ في الإرسال: {e}")
-
-async def scan_market(session, bot):
-   log.info("🔍 بدء المسح...")
-   tickers = await get_ticker_24h(session)
-
-   usdt_pairs = [
-       t for t in tickers
-       if t["symbol"].endswith("USDT")
-       and not is_blacklisted(t["symbol"])
-   ]
-
-   log.info(f"📋 عملات بعد الفلتر: {len(usdt_pairs)}")
-   signals_sent = 0
-
-   for ticker in usdt_pairs:
-       try:
-           symbol = ticker["symbol"]
-           change_24h = float(ticker["priceChangePercent"])
-           volume = float(ticker["quoteVolume"])
-           price = float(ticker["lastPrice"])
-
-           if change_24h > MAX_PRICE_CHANGE_24H or change_24h < MIN_PRICE_CHANGE_24H:
-               continue
-
-           ct = time.time()
-           if symbol in sent_tokens and ct - sent_tokens[symbol] < COOLDOWN_HOURS * 3600:
-               continue
-
-           analysis = await analyze_candles(session, symbol)
-           if not analysis:
-               continue
-
-           change_1h = analysis["price_change_1h"]
-           change_4h = analysis["price_change_4h"]
-           vol_surge = analysis["vol_surge"]
-           is_breakout = analysis["is_breakout"]
-
-           if change_1h < MIN_PRICE_CHANGE_1H:
-               continue
-           if change_4h < MIN_PRICE_CHANGE_4H:
-               continue
-           if vol_surge < 1.5:
-               continue
-
-           score, target_low, target_high, strength = estimate_potential(
-               change_1h, change_4h, vol_surge, is_breakout
-           )
-
-           await send_signal(bot, {
-               "symbol": symbol,
-               "change_1h": change_1h,
-               "change_4h": change_4h,
-               "change_24h": change_24h,
-               "volume": volume,
-               "vol_surge": vol_surge,
-               "is_breakout": is_breakout,
-               "price": price,
-               "score": score,
-               "target_low": target_low,
-               "target_high": target_high,
-               "strength": strength,
-           })
-
-           sent_tokens[symbol] = ct
-           signals_sent += 1
-           await asyncio.sleep(2)
-
-       except Exception as e:
-           log.error(f"خطأ: {e}")
-           continue
-
-   log.info(f"✅ انتهى المسح - إشارات أُرسلت: {signals_sent}")
-
-async def health(request):
-   return web.Response(text="AlphaBot Running ✅")
-
-async def main():
-   bot = Bot(token=BOT_TOKEN)
-   log.info("✅ AlphaBot بدأ!")
-
-   app = web.Application()
-   app.router.add_get("/", health)
-   runner = web.AppRunner(app)
-   await runner.setup()
-   site = web.TCPSite(runner, "0.0.0.0", 10000)
-   await site.start()
-   log.info("🌐 Web server شغال على port 10000")
-
-   async with aiohttp.ClientSession() as session:
-       while True:
-           try:
-               await scan_market(session, bot)
-               log.info(f"⏳ انتظار {SCAN_INTERVAL_MINUTES} دقيقة...")
-               await asyncio.sleep(SCAN_INTERVAL_MINUTES * 60)
-           except Exception as e:
-               log.error(f"خطأ رئيسي: {e}")
-               await asyncio.sleep(60)
-
-if __name__ == "__main__":
-   asyncio.run(main())
+⚠️ <i>ليست نصي
