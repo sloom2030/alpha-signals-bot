@@ -12,7 +12,7 @@ CHANNEL_ID = -1003924776124
 SCAN_INTERVAL_MINUTES = 15
 
 # فلاتر العملات
-MIN_VOLUME_USDT = 100_000
+MIN_VOLUME_USDT = 50_000
 MAX_VOLUME_USDT = 50_000_000
 MIN_PRICE_CHANGE_1H = 1.5
 MIN_PRICE_CHANGE_4H = 3.0
@@ -155,12 +155,12 @@ async def send_signal(bot, data):
 الهدف: <b>+{target_low}% ~ +{target_high}%</b>
 القوة: {strength} (نقاط: {score}/10)
 
-⚠️ <i>ليست نصيحة مالية - تداول بمسؤولية</i>
+⚠ <i>ليست نصيحة مالية - تداول بمسؤولية</i>
 #AlphaSignals #{sym.replace('USDT', '')}"""
 
    try:
        await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode=ParseMode.HTML)
-       log.info(f"✅ إشارة أرسلت: {sym}")
+       log.info(f"✅ إشارة أُرسلت: {sym}")
    except Exception as e:
        log.error(f"خطأ في الإرسال: {e}")
 
@@ -240,7 +240,7 @@ async def scan_market(session, bot):
            log.error(f"خطأ في {ticker.get('symbol', '?')}: {e}")
            continue
 
-   log.info(f"✅ انتهى المسح - إشارات أرسلت: {signals_sent}")
+   log.info(f"✅ انتهى المسح - إشارات أُرسلت: {signals_sent}")
 
 async def health(request):
    return web.Response(text="AlphaBot Running ✅")
