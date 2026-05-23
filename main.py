@@ -20,7 +20,7 @@ MIN_TRADES_COUNT = 50
 COOLDOWN_HOURS = 6
 
 BLACKLIST = ["USDT", "BUSD", "USDC", "DAI", "TUSD", "FDUSD", "USDP", "WBTC", "BETH"]
-BINANCE_BASE = "https://api.binance.com/api/v3"
+BINANCE_BASE = "https://api.binance.us/api/v3"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s")
 log = logging.getLogger("AlphaBot")
