@@ -51,23 +51,37 @@ async def analyze_candles(session, symbol):
     klines_4h = await get_klines(session, symbol, "4h", 4)
     if len(klines_1h) < 4 or len(klines_4h) < 2:
         return None
+
     last_close = float(klines_1h[-1][4])
     prev_close = float(klines_1h[-2][4])
-    vol_last = float(klines_1h[-1][5])
-    vol_prev = float(klines_1h[-2][5])
+    vol_last = float(klines_1h[-1][5]) * last_close
+    vol_prev = float(klines_1h[-2][5]) * float(klines_1h[-2][4])
+    vol_avg = sum(float(k[5]) * float(k[4]) for k in klines_1h[:-1]) / max(len(klines_1h) - 1, 1)
+
     price_change_1h = ((last_close - prev_close) / prev_close) * 100
     vol_surge = vol_last / vol_prev if vol_prev > 0 else 0
+
     open_4h = float(klines_4h[-1][1])
     close_4h = float(klines_4h[-1][4])
     price_change_4h = ((close_4h - open_4h) / open_4h) * 100
+
     highs = [float(k[2]) for k in klines_1h[:-1]]
     prev_high = max(highs) if highs else last_close
     is_breakout = last_close > prev_high
+
+    # تنبؤ حجم التداول القادم
+    predicted_vol_low = vol_last * 1.2
+    predicted_vol_high = vol_last * vol_surge * 1.5
+
     return {
         "price_change_1h": price_change_1h,
         "price_change_4h": price_change_4h,
         "vol_surge": vol_surge,
         "is_breakout": is_breakout,
+        "vol_current": vol_last,
+        "vol_avg": vol_avg,
+        "predicted_vol_low": predicted_vol_low,
+        "predicted_vol_high": predicted_vol_high,
     }
 
 def estimate_potential(change_1h, change_4h, vol_surge, is_breakout):
@@ -83,12 +97,19 @@ def estimate_potential(change_1h, change_4h, vol_surge, is_breakout):
     elif change_4h >= 5: score += 1
     if score >= 8: return score, 25, 80, "Strong x3"
     elif score >= 6: return score, 15, 40, "Strong x2"
-    elif score >= 4: score, 8, 20, "Medium"
+    elif score >= 4: return score, 8, 20, "Medium"
     return score, 3, 10, "Weak"
 
 def is_blacklisted(symbol):
     clean = symbol.replace("USDT", "")
     return any(bl == clean for bl in BLACKLIST)
+
+def format_volume(vol):
+    if vol >= 1_000_000:
+        return f"{vol/1_000_000:.2f}M$"
+    elif vol >= 1_000:
+        return f"{vol/1_000:.1f}K$"
+    return f"{vol:.0f}$"
 
 async def send_signal(bot, data):
     sym = data["symbol"]
@@ -103,16 +124,20 @@ async def send_signal(bot, data):
     target_low = data["target_low"]
     target_high = data["target_high"]
     strength = data["strength"]
+    predicted_vol_low = data["predicted_vol_low"]
+    predicted_vol_high = data["predicted_vol_high"]
     coin = sym.replace("USDT", "")
     breakout_text = "YES" if is_breakout else "NO"
+
     msg = (
         f"<b>Alpha Signal | {sym}</b>\n\n"
         f"Price: <code>{price}</code> USDT\n"
         f"1h: <b>{change_1h:+.1f}%</b> | 4h: <b>{change_4h:+.1f}%</b> | 24h: <b>{change_24h:+.1f}%</b>\n"
-        f"Volume: <b>{volume/1_000_000:.2f}M$</b>\n"
+        f"Volume Now: <b>{format_volume(volume)}</b>\n"
         f"Volume Surge: <b>x{vol_surge:.1f}</b>\n"
         f"Breakout: <b>{breakout_text}</b>\n\n"
-        f"Target: <b>+{target_low}% ~ +{target_high}%</b>\n"
+        f"Price Target: <b>+{target_low}% ~ +{target_high}%</b>\n"
+        f"Vol Target: <b>{format_volume(predicted_vol_low)} ~ {format_volume(predicted_vol_high)}</b>\n"
         f"Strength: {strength} (Score: {score}/10)\n\n"
         f"#AlphaSignals #{coin}"
     )
@@ -172,6 +197,8 @@ async def scan_market(session, bot):
                 "target_low": target_low,
                 "target_high": target_high,
                 "strength": strength,
+                "predicted_vol_low": analysis["predicted_vol_low"],
+                "predicted_vol_high": analysis["predicted_vol_high"],
             })
             sent_tokens[symbol] = ct
             signals_sent += 1
