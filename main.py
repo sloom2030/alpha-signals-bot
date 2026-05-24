@@ -66,4 +66,5 @@ async def send_signal(bot, symbol, price, change_1h, mcap, volume, change_24h):
 
 async def fetch_coins(session):
     try:
-        url = "https://api.coingecko.com/api/v
+        f"السعر: ${price:.8f}\n"
+
