@@ -6,8 +6,7 @@ from telegram import Bot
 from telegram.constants import ParseMode
 
 BOT_TOKEN = "8735462840:AAF5uJI6w5ZVUjxqy58rpawLJP4X_9v51A8"
-CHANNEL_ID = -1003924776124
-
+CHANNEL_ID = "@AlphaSignalsBot"
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("AlphaBot")
 sent_tokens = {}
