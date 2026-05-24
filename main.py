@@ -2,282 +2,152 @@ import asyncio
 import aiohttp
 import logging
 import time
+from datetime import datetime, timezone
 from telegram import Bot
 from telegram.constants import ParseMode
-from aiohttp import web
 
 BOT_TOKEN = "8735462840:AAF5uJI6w5ZVUjxqy58rpawLJP4X_9v51A8"
-CHANNEL_ID = -1003924776124
+CHANNEL_ID = -1001234567890
+
 SCAN_INTERVAL_MINUTES = 15
+MIN_VOLUME_USD = 50000
+MAX_MARKET_CAP_USD = 20000000
+MIN_MARKET_CAP_USD = 100000
+MIN_VOLUME_MCAP_RATIO = 0.15
+MIN_PRICE_CHANGE_1H = 3.0
+MIN_PRICE_CHANGE_6H = 5.0
+BREAKOUT_THRESHOLD = 8.0
+MIN_LIQUIDITY_USD = 30000
+COOLDOWN_HOURS = 4
+BLACKLIST_KEYWORDS = ["elon", "doge2", "moon", "safe", "inu", "baby", "pepe2", "shib2"]
+COINGECKO_BASE = "https://api.coingecko.com/api/v3"
+DEXSCREENER_BASE = "https://api.dexscreener.com/latest/dex/search"
 
-MIN_PRICE_CHANGE_1H = 1.5
-MIN_PRICE_CHANGE_4H = 3.0
-MIN_PRICE_CHANGE_24H = 3.0
-MAX_PRICE_CHANGE_24H = 60.0
-COOLDOWN_HOURS = 6
-
-BLACKLIST = ["BUSD", "USDC", "DAI", "TUSD", "FDUSD", "USDP", "WBTC", "BETH"]
-
-BINANCE_ENDPOINTS = [
-   "https://api.binance.us/api/v3",
-   "https://api1.binance.com/api/v3",
-   "https://api2.binance.com/api/v3",
-]
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(message)s")
+logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("AlphaBot")
+
 sent_tokens = {}
 
-async def get_ticker_24h(session, base_url):
-   try:
-       async with session.get(f"{base_url}/ticker/24hr", timeout=aiohttp.ClientTimeout(total=15)) as r:
-           if r.status == 200:
-               data = await r.json()
-               log.info(f"Got {len(data)} coins from {base_url}")
-               return data
-           else:
-               log.error(f"Status {r.status} from {base_url}")
-   except Exception as e:
-       log.error(f"Error from {base_url}: {e}")
-   return []
+async def fetch_coingecko_data(session):
+    try:
+        params = {
+            "vs_currency": "usd",
+            "order": "market_cap_desc",
+            "per_page": 250,
+            "sparkline": False,
+            "price_change_percentage": "1h,24h"
+        }
+        
+        url = f"{COINGECKO_BASE}/coins/markets"
+        async with session.get(url, params=params, timeout=10) as resp:
+            if resp.status == 200:
+                return await resp.json()
+    except Exception as e:
+        log.error(f"CoinGecko Error: {e}")
+    return []
 
-async def get_klines(session, base_url, symbol, interval="1h", limit=6):
-   try:
-       params = {"symbol": symbol, "interval": interval, "limit": limit}
-       async with session.get(f"{base_url}/klines", params=params, timeout=aiohttp.ClientTimeout(total=10)) as r:
-           if r.status == 200:
-               return await r.json()
-   except:
-       pass
-   return []
+async def fetch_dex_data(session, token_symbol):
+    try:
+        async with session.get(
+            f"{DEXSCREENER_BASE}?q={token_symbol}",
+            timeout=10
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("pairs"):
+                    return data["pairs"][0]
+    except Exception as e:
+        log.error(f"DexScreener Error: {e}")
+    return None
 
-async def analyze_candles(session, base_url, symbol):
-   klines_1h = await get_klines(session, base_url, symbol, "1h", 6)
-   klines_4h = await get_klines(session, base_url, symbol, "4h", 4)
-   if len(klines_1h) < 4 or len(klines_4h) < 2:
-       return None
+def is_blacklisted(name):
+    name_lower = name.lower()
+    return any(keyword in name_lower for keyword in BLACKLIST_KEYWORDS)
 
-   last_close = float(klines_1h[-1][4])
-   prev_close = float(klines_1h[-2][4])
-   vol_last = float(klines_1h[-1][5]) * last_close
-   vol_prev = float(klines_1h[-2][5]) * float(klines_1h[-2][4])
-
-   price_change_1h = ((last_close - prev_close) / prev_close) * 100
-   vol_surge = vol_last / vol_prev if vol_prev > 0 else 0
-
-   open_4h = float(klines_4h[-1][1])
-   close_4h = float(klines_4h[-1][4])
-   price_change_4h = ((close_4h - open_4h) / open_4h) * 100
-
-   highs = [float(k[2]) for k in klines_1h[:-1]]
-   prev_high = max(highs) if highs else last_close
-   is_breakout = last_close > prev_high
-
-   predicted_vol_low = vol_last * 1.2
-   predicted_vol_high = vol_last * vol_surge * 1.5
-
-   return {
-       "price_change_1h": price_change_1h,
-       "price_change_4h": price_change_4h,
-       "vol_surge": vol_surge,
-       "is_breakout": is_breakout,
-       "vol_current": vol_last,
-       "predicted_vol_low": predicted_vol_low,
-       "predicted_vol_high": predicted_vol_high,
-   }
-
-def estimate_potential(change_1h, change_4h, vol_surge, is_breakout):
-   score = 0
-   if vol_surge >= 5: score += 3
-   elif vol_surge >= 3: score += 2
-   elif vol_surge >= 2: score += 1
-   if is_breakout: score += 2
-   if change_1h >= 8: score += 3
-   elif change_1h >= 5: score += 2
-   elif change_1h >= 3: score += 1
-   if change_4h >= 10: score += 2
-   elif change_4h >= 5: score += 1
-   if score >= 8: return score, 25, 80, "Strong x3"
-   elif score >= 6: return score, 15, 40, "Strong x2"
-   elif score >= 4: return score, 8, 20, "Medium"
-   return score, 3, 10, "Weak"
-
-def is_blacklisted(symbol):
-   clean = symbol.replace("USDT", "")
-   return any(bl == clean for bl in BLACKLIST)
-
-def format_volume(vol):
-   if vol >= 1_000_000:
-       return f"{vol/1_000_000:.2f}M$"
-   elif vol >= 1_000:
-       return f"{vol/1_000:.1f}K$"
-   return f"{vol:.0f}$"
-
-def is_alpha(change_1h, change_4h, vol_surge, is_breakout, volume):
-   score = 0
-   if vol_surge >= 10: score += 3
-   elif vol_surge >= 5: score += 2
-   elif vol_surge >= 3: score += 1
-   if is_breakout: score += 2
-   if change_1h >= 10: score += 3
-   elif change_1h >= 5: score += 2
-   if change_4h >= 15: score += 2
-   elif change_4h >= 8: score += 1
-   if volume < 500_000: score += 1
-   return score >= 5
-
-async def send_signal(bot, data):
-   sym = data["symbol"]
-   change_1h = data["change_1h"]
-   change_4h = data["change_4h"]
-   change_24h = data["change_24h"]
-   volume = data["volume"]
-   vol_surge = data["vol_surge"]
-   is_breakout = data["is_breakout"]
-   price = data["price"]
-   score = data["score"]
-   target_low = data["target_low"]
-   target_high = data["target_high"]
-   strength = data["strength"]
-   predicted_vol_low = data["predicted_vol_low"]
-   predicted_vol_high = data["predicted_vol_high"]
-   alpha = data["alpha"]
-   exchange = data["exchange"]
-   coin = sym.replace("USDT", "")
-   breakout_text = "YES" if is_breakout else "NO"
-   alpha_tag = "ALPHA " if alpha else ""
-
-   msg = (
-       f"{alpha_tag}<b>Signal | {sym}</b>\n"
-       f"Exchange: {exchange}\n\n"
-       f"Price: <code>{price}</code> USDT\n"
-       f"1h: <b>{change_1h:+.1f}%</b> | 4h: <b>{change_4h:+.1f}%</b> | 24h: <b>{change_24h:+.1f}%</b>\n"
-       f"Volume Now: <b>{format_volume(volume)}</b>\n"
-       f"Volume Surge: <b>x{vol_surge:.1f}</b>\n"
-       f"Breakout: <b>{breakout_text}</b>\n\n"
-       f"Price Target: <b>+{target_low}% ~ +{target_high}%</b>\n"
-       f"Vol Target: <b>{format_volume(predicted_vol_low)} ~ {format_volume(predicted_vol_high)}</b>\n"
-       f"Strength: {strength} (Score: {score}/10)\n\n"
-       f"#AlphaSignals #{coin}"
-   )
-   try:
-       await bot.send_message(chat_id=CHANNEL_ID, text=msg, parse_mode=ParseMode.HTML)
-       log.info(f"Signal sent: {sym} from {exchange}")
-   except Exception as e:
-       log.error(f"Send error: {e}")
-
-async def scan_exchange(session, bot, base_url):
-   exchange_name = "Binance US" if "binance.us" in base_url else "Binance"
-   tickers = await get_ticker_24h(session, base_url)
-   if not tickers:
-       return 0
-
-   usdt_pairs = [
-       t for t in tickers
-       if t["symbol"].endswith("USDT")
-       and not is_blacklisted(t["symbol"])
-   ]
-
-   log.info(f"{exchange_name} - Pairs: {len(usdt_pairs)}")
-   signals_sent = 0
-
-   for ticker in usdt_pairs:
-       try:
-           symbol = ticker["symbol"]
-           change_24h = float(ticker["priceChangePercent"])
-           volume = float(ticker["quoteVolume"])
-           price = float(ticker["lastPrice"])
-
-           if change_24h > MAX_PRICE_CHANGE_24H or change_24h < MIN_PRICE_CHANGE_24H:
-               continue
-
-           key = f"{exchange_name}:{symbol}"
-           ct = time.time()
-           if key in sent_tokens and ct - sent_tokens[key] < COOLDOWN_HOURS * 3600:
-               continue
-
-           analysis = await analyze_candles(session, base_url, symbol)
-           if not analysis:
-               continue
-
-           change_1h = analysis["price_change_1h"]
-           change_4h = analysis["price_change_4h"]
-           vol_surge = analysis["vol_surge"]
-           is_breakout_val = analysis["is_breakout"]
-
-           if change_1h < MIN_PRICE_CHANGE_1H:
-               continue
-           if change_4h < MIN_PRICE_CHANGE_4H:
-               continue
-           if vol_surge < 1.5:
-               continue
-
-           score, target_low, target_high, strength = estimate_potential(
-               change_1h, change_4h, vol_surge, is_breakout_val
-           )
-
-           alpha = is_alpha(change_1h, change_4h, vol_surge, is_breakout_val, volume)
-
-           await send_signal(bot, {
-               "symbol": symbol,
-               "change_1h": change_1h,
-               "change_4h": change_4h,
-               "change_24h": change_24h,
-               "volume": volume,
-               "vol_surge": vol_surge,
-               "is_breakout": is_breakout_val,
-               "price": price,
-               "score": score,
-               "target_low": target_low,
-               "target_high": target_high,
-               "strength": strength,
-               "predicted_vol_low": analysis["predicted_vol_low"],
-               "predicted_vol_high": analysis["predicted_vol_high"],
-               "alpha": alpha,
-               "exchange": exchange_name,
-           })
-
-           sent_tokens[key] = ct
-           signals_sent += 1
-           await asyncio.sleep(2)
-
-       except Exception as e:
-           log.error(f"Error {symbol}: {e}")
-           continue
-
-   return signals_sent
+async def send_signal(bot, token_name, price_change_1h, price_change_24h, 
+                      market_cap, volume_usd, volume_mcap_ratio):
+    message = (
+        f"🚀 <b>ALPHA SIGNAL - {token_name}</b>\n\n"
+        f"<b>أسباب الإشارة:</b> 📋\n"
+        f"حجم التداول: {volume_usd/1000:.0f}K$\n"
+        f"ماركت كاب: {market_cap/1000000:.2f}M$\n"
+        f"ارتفاع 1h: {price_change_1h:.1f}% ⚡\n"
+        f"ارتفاع 24h: {price_change_24h:.1f}% 📈\n"
+        f"ضغط شراء قوي: {volume_mcap_ratio*100:.0f}% 🔥\n\n"
+        f"⚠️ ليست نصيحة استثمارية\n"
+        f"#AlphaSignals #LowCap #ZEST"
+    )
+    
+    try:
+        await bot.send_message(
+            chat_id=CHANNEL_ID,
+            text=message,
+            parse_mode=ParseMode.HTML
+        )
+        log.info(f"✅ إشارة مرسلة: {token_name}")
+    except Exception as e:
+        log.error(f"خطأ الإرسال: {e}")
 
 async def scan_market(session, bot):
-   log.info("Scanning all exchanges...")
-   total = 0
-   for endpoint in BINANCE_ENDPOINTS:
-       signals = await scan_exchange(session, bot, endpoint)
-       total += signals
-       await asyncio.sleep(3)
-   log.info(f"Done - total signals sent: {total}")
-
-async def health(request):
-   return web.Response(text="AlphaBot Running")
+    log.info("🔍 بدء الفحص...")
+    
+    coins = await fetch_coingecko_data(session)
+    
+    for coin in coins:
+        try:
+            symbol = coin.get("symbol", "").upper()
+            name = coin.get("name", "")
+            market_cap = coin.get("market_cap") or 0
+            volume_24h = coin.get("total_volume") or 0
+            price_change_1h = coin.get("price_change_percentage_1h_in_currency") or 0
+            price_change_24h = coin.get("price_change_percentage_24h_in_currency") or 0
+            
+            if is_blacklisted(name):
+                continue
+            
+            if not (MIN_MARKET_CAP_USD <= market_cap <= MAX_MARKET_CAP_USD):
+                continue
+            
+            if volume_24h < MIN_VOLUME_USD:
+                continue
+            
+            volume_mcap_ratio = volume_24h / market_cap if market_cap > 0 else 0
+            
+            if volume_mcap_ratio < MIN_VOLUME_MCAP_RATIO:
+                continue
+            
+            if price_change_1h < MIN_PRICE_CHANGE_1H:
+                continue
+            
+            if price_change_24h < MIN_PRICE_CHANGE_6H:
+                continue
+            
+            current_time = time.time()
+            if symbol in sent_tokens:
+                if current_time - sent_tokens[symbol] < COOLDOWN_HOURS * 3600:
+                    continue
+            
+            await send_signal(bot, symbol, price_change_1h, price_change_24h, market_cap, volume_24h, volume_mcap_ratio)
+            sent_tokens[symbol] = current_time
+            await asyncio.sleep(1)
+        
+        except Exception as e:
+            log.error(f"خطأ في معالجة {symbol}: {e}")
+            continue
 
 async def main():
-   bot = Bot(token=BOT_TOKEN)
-   log.info("AlphaBot started!")
-   app = web.Application()
-   app.router.add_get("/", health)
-   runner = web.AppRunner(app)
-   await runner.setup()
-   site = web.TCPSite(runner, "0.0.0.0", 10000)
-   await site.start()
-   log.info("Web server running on port 10000")
-   async with aiohttp.ClientSession() as session:
-       while True:
-           try:
-               await scan_market(session, bot)
-               log.info(f"Waiting {SCAN_INTERVAL_MINUTES} minutes...")
-               await asyncio.sleep(SCAN_INTERVAL_MINUTES * 60)
-           except Exception as e:
-               log.error(f"Main error: {e}")
-               await asyncio.sleep(60)
+    bot = Bot(token=BOT_TOKEN)
+    log.info("✅ البوت بدأ!")
+    
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                await scan_market(session, bot)
+                log.info(f"✅ الفحص انتهى - انتظار {SCAN_INTERVAL_MINUTES} دقائق...")
+                await asyncio.sleep(SCAN_INTERVAL_MINUTES * 60)
+            except Exception as e:
+                log.error(f"خطأ في الحلقة الرئيسية: {e}")
+                await asyncio.sleep(60)
 
 if __name__ == "__main__":
-   asyncio.run(main())
+    asyncio.run(main())
