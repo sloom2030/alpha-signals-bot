@@ -62,7 +62,8 @@ async def scan_market(session, bot):
                 continue
             if not (100000 <= mcap <= 20000000):
                 continue
-            if volume < 50000 or change_1h < 3.0:
+            if volume < 20000 or change_1h < 1.0:
+
                 continue
             if symbol not in sent_tokens:
                 await send_signal(bot, symbol, price, change_1h, mcap, volume, change_24h)
